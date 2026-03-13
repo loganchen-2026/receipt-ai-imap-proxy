@@ -8,16 +8,14 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { simpleParser } from 'mailparser';
 import { connect } from 'imap-simple';
 
-// 多平台规则引擎匹配规则接口
 export interface ThreeDMatchRule {
-  platform_name: string; // 新增：平台名称标识
+  platform_name: string;
   from: string;
   subject: string;
   body_contains: string;
   enabled: boolean;
 }
 
-// 请求接口定义
 export interface FetchEmailsRequest {
   imapConfig: {
     host: string;
@@ -26,12 +24,11 @@ export interface FetchEmailsRequest {
     password: string;
     tls: boolean;
   };
-  searchRules: ThreeDMatchRule[]; // 改为三维规则数组
+  searchRules: ThreeDMatchRule[];
   lastProcessedUid?: number;
-  maxFetchCount?: number; // 新增：最大处理邮件数量，防止 Vercel 超时
+  maxFetchCount?: number;
 }
 
-// 响应接口定义
 export interface FetchEmailsResponse {
   success: boolean;
   emails: EmailData[];
@@ -44,7 +41,7 @@ export interface EmailData {
   subject: string;
   from: string;
   date: string;
-  platform_name?: string; // 新增：匹配的平台名称
+  platform_name?: string;
   attachments: AttachmentData[];
 }
 
@@ -55,42 +52,37 @@ export interface AttachmentData {
   size: number;
 }
 
-// 邮件内容类型检测
+function safeString(value: any): string {
+  return (value && typeof value === 'string') ? value.trim() : '';
+}
+
+function safeBool(value: any): boolean {
+  return value === true;
+}
+
 function detectFileType(filename: string, contentType: string): string {
-  const lowerFilename = filename.toLowerCase();
-  
+  const lowerFilename = (filename || '').toLowerCase();
   if (lowerFilename.endsWith('.pdf')) return 'pdf';
   if (lowerFilename.endsWith('.html') || lowerFilename.endsWith('.htm')) return 'html';
-  if (contentType.includes('pdf')) return 'pdf';
-  if (contentType.includes('html')) return 'html';
-  
-  // 常见收据相关的 MIME 类型
-  if (contentType.includes('application/pdf')) return 'pdf';
-  if (contentType.includes('text/html')) return 'html';
-  
+  if ((contentType || '').includes('pdf')) return 'pdf';
+  if ((contentType || '').includes('html')) return 'html';
   return 'unknown';
 }
 
-// 构建 IMAP 初筛搜索条件（仅基于 FROM 和 SUBJECT）
 function buildSearchCriteria(searchRules: ThreeDMatchRule[], lastProcessedUid?: number): any[] {
-  const criteria: any[] = ['UNSEEN']; // 只处理未读邮件
-  
-  // UID 增量同步
+  const criteria: any[] = ['UNSEEN'];
   if (lastProcessedUid && lastProcessedUid > 0) {
     criteria.push(['UID', `${lastProcessedUid + 1}:*`]);
   }
-  
-  // 日期过滤 - 默认过去30天
   const defaultSinceDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   criteria.push(['SINCE', defaultSinceDate]);
   
-  // 提取所有启用的规则的 from 和 subject 进行初筛（过滤空字符串）
-  const enabledRules = searchRules.filter(rule => rule.enabled);
-  const fromSet = new Set(enabledRules.map(rule => rule.from).filter(v => v && v.trim() !== ''));
-  const subjectSet = new Set(enabledRules.map(rule => rule.subject).filter(v => v && v.trim() !== ''));
+  const enabledRules = (searchRules || []).filter(rule => safeBool(rule.enabled));
+  const validFromRules = enabledRules.filter(rule => safeString(rule.from) !== '');
+  const validSubjectRules = enabledRules.filter(rule => safeString(rule.subject) !== '');
   
-  // 发件人过滤
-  if (fromSet.size > 0) {
+  if (validFromRules.length > 0) {
+    const fromSet = new Set(validFromRules.map(rule => safeString(rule.from)));
     const fromConditions = Array.from(fromSet).map(from => ['FROM', from]);
     if (fromConditions.length > 1) {
       criteria.push(['OR', ...fromConditions.flat()]);
@@ -99,8 +91,8 @@ function buildSearchCriteria(searchRules: ThreeDMatchRule[], lastProcessedUid?: 
     }
   }
   
-  // 主题过滤
-  if (subjectSet.size > 0) {
+  if (validSubjectRules.length > 0) {
+    const subjectSet = new Set(validSubjectRules.map(rule => safeString(rule.subject)));
     const subjectConditions = Array.from(subjectSet).map(subject => ['SUBJECT', subject]);
     if (subjectConditions.length > 1) {
       criteria.push(['OR', ...subjectConditions.flat()]);
@@ -112,77 +104,75 @@ function buildSearchCriteria(searchRules: ThreeDMatchRule[], lastProcessedUid?: 
   return criteria;
 }
 
-// 多平台规则引擎匹配检查（OR 组间，AND 组内）
 function matchesThreeDConditions(emailFrom: string, emailSubject: string, emailBody: string, rules: ThreeDMatchRule[]): { matched: boolean; platformName?: string } {
-  const enabledRules = rules.filter(rule => rule.enabled);
+  const enabledRules = (rules || []).filter(rule => safeBool(rule.enabled));
   
-  // 使用 Array.prototype.some() 实现 OR 组间匹配
+  if (enabledRules.length === 0) {
+    return { matched: true, platformName: '连通性测试' };
+  }
+  
   const matchedRule = enabledRules.find(rule => {
-    // AND 组内匹配：三个条件必须同时满足
-    const fromMatch = emailFrom.toLowerCase().includes(rule.from.toLowerCase());
-    const subjectMatch = emailSubject.toLowerCase().includes(rule.subject.toLowerCase());
-    const bodyMatch = emailBody.toLowerCase().includes(rule.body_contains.toLowerCase());
+    const ruleFrom = safeString(rule.from);
+    const ruleSubject = safeString(rule.subject);
+    const ruleBody = safeString(rule.body_contains);
+    
+    const fromMatch = ruleFrom === '' || (emailFrom || '').toLowerCase().includes(ruleFrom.toLowerCase());
+    const subjectMatch = ruleSubject === '' || (emailSubject || '').toLowerCase().includes(ruleSubject.toLowerCase());
+    const bodyMatch = ruleBody === '' || (emailBody || '').toLowerCase().includes(ruleBody.toLowerCase());
     
     return fromMatch && subjectMatch && bodyMatch;
   });
   
   if (matchedRule) {
-    console.log(`[IMAP Proxy] 多平台规则匹配成功: ${matchedRule.platform_name} | ${matchedRule.from} | ${matchedRule.subject} | ${matchedRule.body_contains}`);
     return { matched: true, platformName: matchedRule.platform_name };
   }
-  
   return { matched: false };
 }
 
-// 提取邮件正文内容
 function extractEmailBody(parsedMail: any): string {
-  // 优先使用纯文本正文
-  if (parsedMail.text) {
-    return parsedMail.text;
-  }
-  
-  // 如果没有纯文本，尝试从HTML中提取文本内容
+  if (parsedMail.text) return parsedMail.text;
   if (parsedMail.html) {
-    // 简单的HTML标签去除（仅用于关键词匹配）
     return parsedMail.html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   }
-  
   return '';
 }
 
+function findAttachmentParts(struct: any, parts: any[] = []): any[] {
+  if (struct.parts) {
+    for (const part of struct.parts) {
+      findAttachmentParts(part, parts);
+    }
+  }
+  if (struct.disposition && struct.disposition.type !== 'inline') {
+    parts.push(struct);
+  }
+  if (struct.disposition?.filename && !struct.disposition.type) {
+    parts.push(struct);
+  }
+  return parts;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // 只允许 POST 请求
   if (req.method !== 'POST') {
-    return res.status(405).json({ 
-      success: false, 
-      error: 'Method not allowed. Only POST requests are supported.' 
-    });
+    return res.status(405).json({ success: false, error: 'Method not allowed. Only POST requests are supported.' });
   }
-  
-  // 验证请求体
   if (!req.body) {
-    return res.status(400).json({ 
-      success: false, 
-      error: 'Request body is required.' 
-    });
+    return res.status(400).json({ success: false, error: 'Request body is required.' });
   }
+
+  const body = req.body as FetchEmailsRequest;
+  const imapConfig = body.imapConfig;
+  const searchRules = body.searchRules || [];
+  const lastProcessedUid = body.lastProcessedUid;
+  const maxFetchCount = body.maxFetchCount || 5;
   
-  const { imapConfig, searchRules, lastProcessedUid, maxFetchCount = 5 } = req.body as FetchEmailsRequest;
-  
-  // 验证配置
   if (!imapConfig || !imapConfig.host || !imapConfig.user || !imapConfig.password) {
-    return res.status(400).json({ 
-      success: false, 
-      error: 'Invalid IMAP configuration. host, user, and password are required.' 
-    });
+    return res.status(400).json({ success: false, error: 'Invalid IMAP configuration.' });
   }
-  
+
   let connection: any = null;
   
   try {
-    console.log(`[IMAP Proxy] Connecting to ${imapConfig.host} for user ${imapConfig.user}`);
-    
-    // 连接 IMAP 服务器
     connection = await connect({
       imap: {
         host: imapConfig.host,
@@ -195,36 +185,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
     
-    console.log('[IMAP Proxy] Connected successfully');
-    
-    // 打开收件箱
     await connection.openBox('INBOX');
-    
-    // 构建初筛搜索条件（仅基于 FROM 和 SUBJECT）
-    const searchCriteria = buildSearchCriteria(searchRules || [], lastProcessedUid);
-    console.log('[IMAP Proxy] 初筛条件:', searchCriteria);
-    
-    // 搜索邮件（初筛）
-    const messages = await connection.search(searchCriteria, {
-      bodies: ['HEADER', 'TEXT'],
-      struct: true
-    });
-    
-    console.log(`[IMAP Proxy] 初筛找到 ${messages.length} 封邮件，最大处理数: ${maxFetchCount}`);
+    const searchCriteria = buildSearchCriteria(searchRules, lastProcessedUid);
+    const messages = await connection.search(searchCriteria, { bodies: ['HEADER', 'TEXT'], struct: true });
     
     const emailResults: EmailData[] = [];
     let maxUid = lastProcessedUid || 0;
-    
-    // 按 UID 降序排序，优先处理最新邮件
     const sortedMessages = messages.sort((a: any, b: any) => b.attributes.uid - a.attributes.uid);
     
-    // 处理每封邮件（限制数量防止 Vercel 超时）
     let processedCount = 0;
     for (const message of sortedMessages) {
-      if (processedCount >= maxFetchCount) {
-        console.log(`[IMAP Proxy] 达到最大处理数 (${maxFetchCount})，停止处理`);
-        break;
-      }
+      if (processedCount >= maxFetchCount) break;
       
       try {
         const uid = message.attributes.uid;
@@ -232,157 +203,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const from = message.parts.filter((part: any) => part.which === 'HEADER')[0]?.body?.from?.[0] || 'Unknown';
         const date = message.parts.filter((part: any) => part.which === 'HEADER')[0]?.body?.date?.[0] || new Date().toISOString();
         
-        console.log(`[IMAP Proxy] 处理邮件 UID:${uid} - 发件人:${from} - 主题:${subject}`);
+        if (uid > maxUid) maxUid = uid;
         
-        // 更新最大 UID
-        if (uid > maxUid) {
-          maxUid = uid;
-        }
-        
-        // 提取邮件正文内容进行三维精筛
         let emailBody = '';
         try {
-          // 获取完整的邮件内容进行解析
           const messageData = await connection.getPartData(message);
           const parsedMail = await simpleParser(messageData);
           emailBody = extractEmailBody(parsedMail);
-          
-          console.log(`[IMAP Proxy] 邮件正文长度: ${emailBody.length} 字符`);
-        } catch (error) {
-          console.warn(`[IMAP Proxy] 解析邮件正文失败:`, error);
-        }
+        } catch (error) { console.warn('[IMAP Proxy] 解析邮件正文失败:', error); }
         
-        // 多平台规则引擎匹配检查
-        const matchResult = matchesThreeDConditions(from, subject, emailBody, searchRules || []);
+        const matchResult = matchesThreeDConditions(from, subject, emailBody, searchRules);
         
         if (!matchResult.matched) {
-          console.log(`[IMAP Proxy] 邮件 UID:${uid} 未通过多平台规则精筛，跳过处理`);
-          
-          // 即使不匹配，也要标记为已读避免重复处理
-          try {
-            await connection.addFlags(uid, '\\Seen');
-          } catch (error) {
-            console.warn(`[IMAP Proxy] Failed to mark email ${uid} as seen:`, error);
-          }
-          
-          continue; // 跳过此邮件
+          try { await connection.addFlags(uid, '\\Seen'); } catch (e) {}
+          continue;
         }
-        
-        console.log(`[IMAP Proxy] 邮件 UID:${uid} 通过多平台规则精筛，匹配平台: ${matchResult.platformName}，开始提取附件`);
         
         const attachments: AttachmentData[] = [];
-        
-        // 提取附件（只有通过三维匹配的邮件才处理附件）
         if (message.attributes.struct) {
           const attachmentParts = findAttachmentParts(message.attributes.struct);
-          
           for (const part of attachmentParts) {
             try {
-              // 获取附件内容
               const partData = await connection.getPartData(message, part);
-              
-              // 检测文件类型
-              const fileType = detectFileType(part.disposition?.filename || part.type, part.type);
-              
-              // 只处理 PDF 和 HTML 附件
+              const filename = part.disposition?.filename || part.type || 'unknown';
+              const fileType = detectFileType(filename, part.type);
               if (fileType === 'pdf' || fileType === 'html') {
                 const base64Data = Buffer.from(partData).toString('base64');
-                
-                attachments.push({
-                  filename: part.disposition?.filename || `attachment_${Date.now()}`,
-                  fileType,
-                  base64Data,
-                  size: base64Data.length
-                });
-                
-                console.log(`[IMAP Proxy] 提取 ${fileType} 附件: ${part.disposition?.filename}`);
+                attachments.push({ filename, fileType, base64Data, size: base64Data.length });
               }
-            } catch (error) {
-              console.warn(`[IMAP Proxy] 提取附件失败:`, error);
-            }
+            } catch (error) { console.warn('[IMAP Proxy] 提取附件失败:', error); }
           }
         }
         
-        // 如果有符合条件的附件，添加到结果中
         if (attachments.length > 0) {
-          emailResults.push({
-            uid,
-            subject,
-            from,
-            date,
-            platform_name: matchResult.platformName, // 添加匹配的平台名称
-            attachments
-          });
-          
-          console.log(`[IMAP Proxy] 处理完成: ${subject}，匹配平台: ${matchResult.platformName}，包含 ${attachments.length} 个附件`);
-        } else {
-          console.log(`[IMAP Proxy] 邮件通过多平台规则匹配但无有效附件，跳过`);
+          emailResults.push({ uid, subject, from, date, platform_name: matchResult.platformName, attachments });
         }
         
-        // 标记邮件为已读（避免重复处理）
-        try {
-          await connection.addFlags(uid, '\\Seen');
-        } catch (error) {
-          console.warn(`[IMAP Proxy] 标记已读失败:`, error);
-        }
-        
+        try { await connection.addFlags(uid, '\\Seen'); } catch (e) {}
         processedCount++;
         
-      } catch (error) {
-        console.error(`[IMAP Proxy] 处理邮件失败:`, error);
-      }
+      } catch (error) { console.error('[IMAP Proxy] 处理邮件失败:', error); }
     }
     
-    // 返回结果
-    const response: FetchEmailsResponse = {
-      success: true,
-      emails: emailResults,
-      lastUid: maxUid
-    };
-    
-    console.log(`[IMAP Proxy] Returning ${emailResults.length} emails with attachments`);
-    
-    res.status(200).json(response);
+    res.status(200).json({ success: true, emails: emailResults, lastUid: maxUid });
     
   } catch (error: any) {
     console.error('[IMAP Proxy] Error:', error);
-    
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Unknown error occurred'
-    });
-    
+    res.status(500).json({ success: false, error: error.message || 'Unknown error occurred' });
   } finally {
-    // 强制断开连接 - 阅后即焚
     if (connection) {
-      try {
-        await connection.logout();
-        console.log('[IMAP Proxy] Connection closed');
-      } catch (error) {
-        console.warn('[IMAP Proxy] Error during logout:', error);
-      }
+      try { await connection.logout(); } catch (e) {}
     }
   }
 }
-
-// 递归查找附件部分
-function findAttachmentParts(struct: any, parts: any[] = []): any[] {
-  if (struct.parts) {
-    for (const part of struct.parts) {
-      findAttachmentParts(part, parts);
-    }
-  }
-  
-  // 检测附件（有 disposition 且不是 inline）
-  if (struct.disposition && struct.disposition.type !== 'inline') {
-    parts.push(struct);
-  }
-  
-  // 检测内嵌附件（有 filename 但无 disposition）
-  if (struct.disposition?.filename && !struct.disposition.type) {
-    parts.push(struct);
-  }
-  
-  return parts;
-}
-
