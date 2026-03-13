@@ -10,15 +10,6 @@
     {
       "src": "/api/(.*)",
       "dest": "/api/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/api/$1"
     }
-  ],
-  "functions": {
-    "api/fetch-emails.ts": {
-      "maxDuration": 60
-    }
-  }
+  ]
 }
