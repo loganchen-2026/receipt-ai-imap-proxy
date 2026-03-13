@@ -1,8 +1,7 @@
 {
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/api/fetch-emails"
+  "functions": {
+    "api/fetch-emails.ts": {
+      "maxDuration": 60
     }
-  ]
+  }
 }
