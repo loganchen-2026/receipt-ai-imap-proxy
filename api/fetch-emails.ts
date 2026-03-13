@@ -84,10 +84,10 @@ function buildSearchCriteria(searchRules: ThreeDMatchRule[], lastProcessedUid?: 
   const defaultSinceDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   criteria.push(['SINCE', defaultSinceDate]);
   
-  // 提取所有启用的规则的 from 和 subject 进行初筛
+  // 提取所有启用的规则的 from 和 subject 进行初筛（过滤空字符串）
   const enabledRules = searchRules.filter(rule => rule.enabled);
-  const fromSet = new Set(enabledRules.map(rule => rule.from));
-  const subjectSet = new Set(enabledRules.map(rule => rule.subject));
+  const fromSet = new Set(enabledRules.map(rule => rule.from).filter(v => v && v.trim() !== ''));
+  const subjectSet = new Set(enabledRules.map(rule => rule.subject).filter(v => v && v.trim() !== ''));
   
   // 发件人过滤
   if (fromSet.size > 0) {
@@ -385,3 +385,4 @@ function findAttachmentParts(struct: any, parts: any[] = []): any[] {
   
   return parts;
 }
+
