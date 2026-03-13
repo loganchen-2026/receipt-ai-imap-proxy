@@ -4,8 +4,7 @@
   "description": "无状态 IMAP 代理服务 - 阅后即焚翻译官",
   "main": "index.js",
   "scripts": {
-    "dev": "vercel dev",
-    "build": "tsc"
+    "dev": "vercel dev"
   },
   "dependencies": {
     "@vercel/node": "^2.0.0",
