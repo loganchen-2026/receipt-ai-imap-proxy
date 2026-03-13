@@ -1,11 +1,8 @@
 {
-  "version": 2,
-  "functions": {
-    "api/*.ts": {
-      "runtime": "@vercel/node"
-    }
-  },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api/fetch-emails" }
+    {
+      "source": "/(.*)",
+      "destination": "/api/fetch-emails"
+    }
   ]
 }
