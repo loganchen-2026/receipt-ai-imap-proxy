@@ -1,16 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "lib": ["ES2020"],
     "module": "commonjs",
-    "moduleResolution": "node",
+    "lib": ["ES2020"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "outDir": "./dist",
-    "rootDir": "./api"
+    "resolveJsonModule": true,
+    "moduleResolution": "node"
   },
-  "include": ["api/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["api/**/*.ts"],
+  "exclude": ["node_modules"]
 }
