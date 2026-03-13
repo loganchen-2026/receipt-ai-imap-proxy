@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "./api/fetch-emails.ts",
+      "use": "@vercel/node"
+    }
+  ]
+}
