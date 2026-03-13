@@ -1,0 +1,23 @@
+{
+  "name": "vercel-imap-proxy",
+  "version": "1.0.0",
+  "description": "无状态 IMAP 代理服务 - 阅后即焚翻译官",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@vercel/node": "^2.0.0",
+    "imap-simple": "^5.1.0",
+    "mailparser": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "vercel": "^32.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
