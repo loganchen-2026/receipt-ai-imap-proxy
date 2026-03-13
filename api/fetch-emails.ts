@@ -57,7 +57,8 @@ function safeString(value: any): string {
 }
 
 function safeBool(value: any): boolean {
-  return value === true;
+  if (value === true || value === 1 || value === 'true' || value === '1') return true;
+  return false;
 }
 
 function detectFileType(filename: string, contentType: string): string {
@@ -77,9 +78,19 @@ function buildSearchCriteria(searchRules: ThreeDMatchRule[], lastProcessedUid?: 
   const defaultSinceDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   criteria.push(['SINCE', defaultSinceDate]);
   
+  console.log('[IMAP Proxy] searchRules:', JSON.stringify(searchRules));
   const enabledRules = (searchRules || []).filter(rule => safeBool(rule.enabled));
-  const validFromRules = enabledRules.filter(rule => safeString(rule.from) !== '');
-  const validSubjectRules = enabledRules.filter(rule => safeString(rule.subject) !== '');
+  console.log('[IMAP Proxy] enabledRules count:', enabledRules.length);
+  
+  const validFromRules = enabledRules.filter(rule => {
+    const from = safeString(rule.from);
+    return from !== '';
+  });
+  const validSubjectRules = enabledRules.filter(rule => {
+    const subject = safeString(rule.subject);
+    return subject !== '';
+  });
+  console.log('[IMAP Proxy] validFromRules:', validFromRules.length, 'validSubjectRules:', validSubjectRules.length);
   
   if (validFromRules.length > 0) {
     const fromSet = new Set(validFromRules.map(rule => safeString(rule.from)));
@@ -173,6 +184,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let connection: any = null;
   
   try {
+    console.log(`[IMAP Proxy] Connecting to ${imapConfig.host} for user ${imapConfig.user}`);
+    
     connection = await connect({
       imap: {
         host: imapConfig.host,
@@ -185,9 +198,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
     
+    console.log('[IMAP Proxy] Connected successfully');
+    
     await connection.openBox('INBOX');
     const searchCriteria = buildSearchCriteria(searchRules, lastProcessedUid);
+    console.log('[IMAP Proxy] 初筛条件:', searchCriteria);
+    
     const messages = await connection.search(searchCriteria, { bodies: ['HEADER', 'TEXT'], struct: true });
+    console.log(`[IMAP Proxy] 初筛找到 ${messages.length} 封邮件，最大处理数: ${maxFetchCount}`);
     
     const emailResults: EmailData[] = [];
     let maxUid = lastProcessedUid || 0;
